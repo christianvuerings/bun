@@ -126,10 +126,34 @@ describe("ReadableStream conversion methods", () => {
     // Check it doesn't throw synchronously.
     expect(result).toBeInstanceOf(Promise);
 
-    // TODO: why is the error message different here??
-    expect(async () => await result).toThrowErrorMatchingInlineSnapshot(`"Failed to parse JSON"`);
+    expect(async () => await result).toThrowErrorMatchingInlineSnapshot(`"JSON Parse error: Expected '}'"`);
 
     expect(process.exitCode).toBe(0);
+  });
+
+  test("ReadableStream.prototype.json() rejects with the JSON.parse error for a buffered and a streamed source", async () => {
+    const invalidJson = "{ invalid json content }";
+    expect(() => JSON.parse(invalidJson)).toThrow("JSON Parse error: Expected '}'");
+
+    // A Blob stream holds the whole body, so json() parses it in native code.
+    const buffered = new Blob([invalidJson]).stream();
+    // A stream with a JavaScript source delivers chunks, so json() reads the text first.
+    const streamed = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(invalidJson));
+        controller.close();
+      },
+    });
+
+    const settle = (promise: Promise<unknown>) =>
+      promise.then(
+        () => "resolved",
+        (error: Error) => `${error.name}: ${error.message}`,
+      );
+    expect([await settle(buffered.json()), await settle(streamed.json())]).toEqual([
+      "SyntaxError: JSON Parse error: Expected '}'",
+      "SyntaxError: JSON Parse error: Expected '}'",
+    ]);
   });
 
   test("Bun.spawn() process.stdout.blob() should convert stream to Blob", async () => {
